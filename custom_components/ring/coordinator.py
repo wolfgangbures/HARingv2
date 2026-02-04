@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from asyncio import TaskGroup
+import asyncio
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 import logging
@@ -21,11 +22,13 @@ from ring_doorbell.listen import RingEventListener
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import (
     BaseDataUpdateCoordinatorProtocol,
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.util import async_timeout
 
 from .const import DOMAIN, SCAN_INTERVAL
 
@@ -202,6 +205,7 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
                 err,
                 exc_info=True,
             )
+            await self._async_log_fcm_diagnostics()
             return
         if self.event_listener.started is True:
             self.logger.debug("Started ring listener")
@@ -217,6 +221,34 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         self.index_alerts()
         # Update the listeners so they switch from Unavailable to Unknown
         self._async_update_listeners()
+
+    async def _async_log_fcm_diagnostics(self) -> None:
+        """Log basic connectivity diagnostics for FCM/GCM endpoints."""
+        targets = [
+            ("android.clients.google.com", "https://android.clients.google.com"),
+            ("fcm.googleapis.com", "https://fcm.googleapis.com"),
+        ]
+        session = async_get_clientsession(self.hass)
+        loop = asyncio.get_running_loop()
+
+        for host, url in targets:
+            try:
+                infos = await loop.getaddrinfo(host, None, proto=0)
+                addrs = sorted({info[4][0] for info in infos if info[4]})
+                self.logger.debug("FCM DNS resolve %s -> %s", host, addrs)
+            except Exception as err:
+                self.logger.warning("FCM DNS resolve failed for %s: %s", host, err)
+
+            try:
+                async with async_timeout.timeout(5):
+                    async with session.get(url) as resp:
+                        self.logger.debug(
+                            "FCM HTTPS check %s -> %s",
+                            url,
+                            resp.status,
+                        )
+            except Exception as err:
+                self.logger.warning("FCM HTTPS check failed for %s: %s", url, err)
 
     def _on_event(self, event: RingEvent) -> None:
         self.logger.debug("Ring event received: %s", event)
