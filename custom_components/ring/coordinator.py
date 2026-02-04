@@ -191,9 +191,18 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
     async def _async_start_listen(self) -> None:
         """Start listening for realtime events."""
         self.logger.debug("Starting ring listener.")
-        await self.event_listener.start(
-            timeout=self.start_timeout,
-        )
+        try:
+            await self.event_listener.start(
+                timeout=self.start_timeout,
+            )
+        except Exception as err:
+            self.logger.error(
+                "Ring event listener failed to start (timeout=%s). Error: %s",
+                self.start_timeout,
+                err,
+                exc_info=True,
+            )
+            return
         if self.event_listener.started is True:
             self.logger.debug("Started ring listener")
         else:
