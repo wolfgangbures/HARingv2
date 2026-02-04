@@ -28,7 +28,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
-from homeassistant.util import async_timeout
+import async_timeout
 
 from .const import DOMAIN, SCAN_INTERVAL
 
