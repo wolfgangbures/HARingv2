@@ -33,5 +33,5 @@
   "loggers": ["ring_doorbell"],
   "quality_scale": "bronze",
   "requirements": ["ring-doorbell==0.9.13"],
-  "version": "0.0.2"
+  "version": "0.0.3"
 }

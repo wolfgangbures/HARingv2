@@ -106,7 +106,15 @@ class RingDataCoordinator(DataUpdateCoordinator[RingDevices]):
         await self._call_api(getattr(self.ring_api, update_method))
         self.first_call = False
         devices: RingDevices = self.ring_api.devices()
-        self.logger.debug("Polling complete: %s devices", len(devices.all_devices))
+        self.logger.debug(
+            "Polling complete: all=%s video=%s doorbots=%s stickup_cams=%s chimes=%s other=%s",
+            len(devices.all_devices),
+            len(devices.video_devices),
+            len(devices.doorbots),
+            len(devices.stickup_cams),
+            len(devices.chimes),
+            len(devices.other),
+        )
         subscribed_device_ids = set(self.async_contexts())
         for device in devices.all_devices:
             # Don't update all devices in the ring api, only those that set

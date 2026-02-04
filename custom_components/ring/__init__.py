@@ -40,6 +40,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: RingConfigEntry) -> bool
         entry.entry_id,
         entry.data.get("username"),
     )
+    _LOGGER.debug(
+        "Ring entry data keys: %s",
+        sorted(entry.data.keys()),
+    )
 
     def token_updater(token: dict[str, Any]) -> None:
         """Handle from async context when token is updated."""
@@ -81,9 +85,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: RingConfigEntry) -> bool
     await devices_coordinator.async_config_entry_first_refresh()
     _LOGGER.debug("Initial device refresh complete for entry %s", entry.entry_id)
 
+    devices = ring.devices()
+    _LOGGER.debug(
+        "Ring devices loaded: all=%s video=%s doorbots=%s stickup_cams=%s chimes=%s other=%s",
+        len(devices.all_devices),
+        len(devices.video_devices),
+        len(devices.doorbots),
+        len(devices.stickup_cams),
+        len(devices.chimes),
+        len(devices.other),
+    )
+    for device in devices.all_devices:
+        _LOGGER.debug(
+            "Device detected: name=%s id=%s api_id=%s family=%s model=%s has_subscription=%s capabilities=%s",
+            device.name,
+            device.id,
+            device.device_api_id,
+            device.family,
+            device.model,
+            getattr(device, "has_subscription", None),
+            sorted(list(getattr(device, "capabilities", []) or [])),
+        )
+
     entry.runtime_data = RingData(
         api=ring,
-        devices=ring.devices(),
+        devices=devices,
         devices_coordinator=devices_coordinator,
         listen_coordinator=listen_coordinator,
     )
