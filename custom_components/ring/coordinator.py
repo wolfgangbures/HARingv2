@@ -23,6 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import (
     BaseDataUpdateCoordinatorProtocol,
     DataUpdateCoordinator,
@@ -30,7 +31,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 import async_timeout
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import DOMAIN, SCAN_INTERVAL, FCM_HEALTHCHECK_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -165,11 +166,15 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         )
         self._listeners: dict[CALLBACK_TYPE, tuple[CALLBACK_TYPE, object | None]] = {}
         self._listen_callback_id: int | None = None
+        self._health_check_unsub: CALLBACK_TYPE | None = None
 
         self.config_entry = config_entry
         self.start_timeout = 10
         self.config_entry.async_on_unload(self.async_shutdown)
         self.index_alerts()
+        self._health_check_unsub = async_track_time_interval(
+            hass, self._async_health_check, FCM_HEALTHCHECK_INTERVAL
+        )
 
     def index_alerts(self) -> None:
         "Index the active alerts."
@@ -182,6 +187,9 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
 
     async def async_shutdown(self) -> None:
         """Cancel any scheduled call, and ignore new runs."""
+        if self._health_check_unsub:
+            self._health_check_unsub()
+            self._health_check_unsub = None
         if self.event_listener.started:
             self.logger.debug("Shutting down Ring event listener")
             await self._async_stop_listen()
@@ -221,6 +229,26 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         self.index_alerts()
         # Update the listeners so they switch from Unavailable to Unknown
         self._async_update_listeners()
+
+    async def _async_health_check(self, _now: Any) -> None:
+        """Periodic health check for FCM listener."""
+        if not self._listeners:
+            return
+        self.logger.debug(
+            "Ring listener health check: started=%s listeners=%s",
+            self.event_listener.started,
+            len(self._listeners),
+        )
+        if not self.event_listener.started:
+            self.logger.warning(
+                "Ring listener is not running; attempting restart"
+            )
+            self.config_entry.async_create_task(
+                self.hass,
+                self._async_start_listen(),
+                "Ring event listener restart",
+                eager_start=True,
+            )
 
     async def _async_log_fcm_diagnostics(self) -> None:
         """Log basic connectivity diagnostics for FCM/GCM endpoints."""

@@ -29,6 +29,7 @@ PLATFORMS = [
 
 
 SCAN_INTERVAL = timedelta(minutes=1)
+FCM_HEALTHCHECK_INTERVAL = timedelta(minutes=5)
 
 CONF_2FA = "2fa"
 CONF_LISTEN_CREDENTIALS = "listen_token"
