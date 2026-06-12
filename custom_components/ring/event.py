@@ -21,6 +21,8 @@ from .entity import RingBaseEntity, RingDeviceT
 # Event entity does not perform updates or actions.
 PARALLEL_UPDATES = 0
 
+DOORBELL_EVENT_TYPE_RING = "ring"
+
 
 @dataclass(frozen=True, kw_only=True)
 class RingEventEntityDescription(EventEntityDescription, Generic[RingDeviceT]):
@@ -34,7 +36,8 @@ EVENT_DESCRIPTIONS: tuple[RingEventEntityDescription, ...] = (
         key=KIND_DING,
         translation_key=KIND_DING,
         device_class=EventDeviceClass.DOORBELL,
-        event_types=[KIND_DING],
+        # Keep `ding` for backward compatibility and add `ring` for HA 2027.4.
+        event_types=[KIND_DING, DOORBELL_EVENT_TYPE_RING],
         capability=RingCapability.DING,
     ),
     RingEventEntityDescription(
