@@ -30,6 +30,7 @@ PLATFORMS = [
 
 SCAN_INTERVAL = timedelta(minutes=1)
 FCM_HEALTHCHECK_INTERVAL = timedelta(minutes=5)
+FCM_POST_START_CHECK_DELAY = 30  # seconds; catches immediate crashes after listener start
 
 CONF_2FA = "2fa"
 CONF_LISTEN_CREDENTIALS = "listen_token"

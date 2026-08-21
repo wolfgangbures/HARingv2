@@ -23,7 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.update_coordinator import (
     BaseDataUpdateCoordinatorProtocol,
     DataUpdateCoordinator,
@@ -31,7 +31,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 import async_timeout
 
-from .const import DOMAIN, SCAN_INTERVAL, FCM_HEALTHCHECK_INTERVAL
+from .const import DOMAIN, FCM_HEALTHCHECK_INTERVAL, FCM_POST_START_CHECK_DELAY, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         self._listeners: dict[CALLBACK_TYPE, tuple[CALLBACK_TYPE, object | None]] = {}
         self._listen_callback_id: int | None = None
         self._health_check_unsub: CALLBACK_TYPE | None = None
+        self._restart_check_unsub: CALLBACK_TYPE | None = None
 
         self.config_entry = config_entry
         self.start_timeout = 10
@@ -190,6 +191,9 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         if self._health_check_unsub:
             self._health_check_unsub()
             self._health_check_unsub = None
+        if self._restart_check_unsub:
+            self._restart_check_unsub()
+            self._restart_check_unsub = None
         if self.event_listener.started:
             self.logger.debug("Shutting down Ring event listener")
             await self._async_stop_listen()
@@ -217,6 +221,11 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
             return
         if self.event_listener.started is True:
             self.logger.debug("Started ring listener")
+            if self._restart_check_unsub:
+                self._restart_check_unsub()
+            self._restart_check_unsub = async_call_later(
+                self.hass, FCM_POST_START_CHECK_DELAY, self._async_post_start_check
+            )
         else:
             self.logger.warning(
                 "Ring event listener failed to start after %s seconds",
@@ -277,6 +286,20 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
                         )
             except Exception as err:
                 self.logger.warning("FCM HTTPS check failed for %s: %s", url, err)
+
+    @callback
+    def _async_post_start_check(self, _now: Any) -> None:
+        """Detect immediate FCM crashes (e.g. bad-padding errors) after listener start."""
+        self._restart_check_unsub = None
+        if not self._listeners or self.event_listener.started:
+            return
+        self.logger.warning("Ring listener stopped shortly after start; restarting")
+        self.config_entry.async_create_task(
+            self.hass,
+            self._async_start_listen(),
+            "Ring event listener post-start restart",
+            eager_start=True,
+        )
 
     def _on_event(self, event: RingEvent) -> None:
         self.logger.debug("Ring event received: %s", event)
