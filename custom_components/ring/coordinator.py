@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from asyncio import TaskGroup
 import asyncio
+from base64 import urlsafe_b64decode as _orig_urlsafe_b64decode
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 import logging
@@ -34,6 +35,26 @@ import async_timeout
 from .const import DOMAIN, FCM_HEALTHCHECK_INTERVAL, FCM_POST_START_CHECK_DELAY, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _padded_urlsafe_b64decode(s: str | bytes | bytearray) -> bytes:
+    """urlsafe_b64decode that tolerates missing base64 padding."""
+    if isinstance(s, str):
+        padding = -len(s) % 4
+        s = (s + "=" * padding).encode("ascii")
+    else:
+        padding = -len(s) % 4
+        s = s + b"=" * padding
+    return _orig_urlsafe_b64decode(s)
+
+
+try:
+    import firebase_messaging.fcmpushclient as _fcm_mod  # type: ignore[import-untyped]
+
+    _fcm_mod.urlsafe_b64decode = _padded_urlsafe_b64decode
+    _LOGGER.debug("Patched firebase_messaging urlsafe_b64decode to handle missing padding")
+except Exception:  # noqa: BLE001
+    pass
 
 
 @dataclass
