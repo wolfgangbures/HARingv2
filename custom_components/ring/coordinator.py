@@ -5,6 +5,7 @@ from __future__ import annotations
 from asyncio import TaskGroup
 import asyncio
 from base64 import urlsafe_b64decode as _orig_urlsafe_b64decode
+from base64 import urlsafe_b64encode as _urlsafe_b64encode
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 import logging
@@ -52,7 +53,44 @@ try:
     import firebase_messaging.fcmpushclient as _fcm_mod  # type: ignore[import-untyped]
 
     _fcm_mod.urlsafe_b64decode = _padded_urlsafe_b64decode
-    _LOGGER.debug("Patched firebase_messaging urlsafe_b64decode to handle missing padding")
+
+    # Ring sends raw 64-byte P-256 keys (x‖y) without the 0x04 uncompressed-point prefix.
+    _orig_decrypt_raw_data = _fcm_mod.FcmPushClient._decrypt_raw_data
+
+    @staticmethod  # type: ignore[misc]
+    def _patched_decrypt_raw_data(
+        credentials: dict,
+        crypto_key_str: str,
+        salt_str: str,
+        raw_data: bytes,
+    ) -> bytes:
+        padding = -len(crypto_key_str) % 4
+        key_bytes = _orig_urlsafe_b64decode(
+            (crypto_key_str + "=" * padding).encode("ascii")
+        )
+        if len(key_bytes) == 64:
+            key_bytes = b"\x04" + key_bytes
+            crypto_key_str = _urlsafe_b64encode(key_bytes).decode("ascii").rstrip("=")
+        return _orig_decrypt_raw_data(credentials, crypto_key_str, salt_str, raw_data)
+
+    _fcm_mod.FcmPushClient._decrypt_raw_data = _patched_decrypt_raw_data
+
+    # Don't let per-message decryption errors kill the whole FCM listener.
+    _orig_handle_data_message = _fcm_mod.FcmPushClient._handle_data_message
+
+    def _resilient_handle_data_message(self, msg) -> None:  # type: ignore[misc]
+        try:
+            _orig_handle_data_message(self, msg)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "FCM message skipped due to decryption error (listener stays alive): %s: %s",
+                type(err).__name__,
+                err,
+            )
+
+    _fcm_mod.FcmPushClient._handle_data_message = _resilient_handle_data_message
+
+    _LOGGER.debug("Applied firebase_messaging compatibility patches")
 except Exception:  # noqa: BLE001
     pass
 
