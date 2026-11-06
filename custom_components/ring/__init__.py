@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
-from typing import Any, cast
 import uuid
+from typing import Any, cast
 
 from ring_doorbell import Auth, Ring
 
@@ -21,6 +22,10 @@ from .coordinator import (
     RingDataCoordinator,
     RingListenCoordinator,
 )
+
+# Load platform modules before forwarding setup imports them on the event loop.
+for platform in PLATFORMS:
+    importlib.import_module(f"{__name__}.{platform.value}")
 
 _LOGGER = logging.getLogger(__name__)
 
