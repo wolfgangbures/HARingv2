@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import uuid
 from typing import Any, cast
@@ -22,10 +21,6 @@ from .coordinator import (
     RingDataCoordinator,
     RingListenCoordinator,
 )
-
-# Load platform modules before forwarding setup imports them on the event loop.
-for platform in PLATFORMS:
-    importlib.import_module(f"{__name__}.{platform.value}")
 
 _LOGGER = logging.getLogger(__name__)
 
