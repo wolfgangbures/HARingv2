@@ -13,7 +13,7 @@ Custom Home Assistant integration for Ring devices using the `ring-doorbell` Pyt
 - Button to open intercom doors (supported devices).
 
 ## Requirements
-- Home Assistant Core 2026.11 or newer.
+- Home Assistant Core (recent version recommended).
 - `ffmpeg` integration installed and working.
 - Ring account credentials (2FA supported).
 
