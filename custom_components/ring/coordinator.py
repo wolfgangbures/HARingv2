@@ -65,6 +65,11 @@ try:
         salt_str: str,
         raw_data: bytes,
     ) -> bytes:
+        # Upstream removes dh=/salt= but leaves trailing header parameters.
+        has_key_parameters = ";" in crypto_key_str
+        has_salt_parameters = ";" in salt_str
+        crypto_key_str = crypto_key_str.partition(";")[0].strip().strip('"')
+        salt_str = salt_str.partition(";")[0].strip().strip('"')
         key_bytes = _padded_urlsafe_b64decode(crypto_key_str)
         original_key_length = len(key_bytes)
         if len(key_bytes) == 64:
@@ -72,12 +77,15 @@ try:
             crypto_key_str = _urlsafe_b64encode(key_bytes).decode("ascii").rstrip("=")
         _LOGGER.debug(
             "FCM decrypt: public_key_bytes=%s normalized_key_bytes=%s "
-            "point_prefix=%s salt_chars=%s payload_bytes=%s",
+            "point_prefix=%s salt_chars=%s payload_bytes=%s "
+            "crypto_key_parameters=%s encryption_parameters=%s",
             original_key_length,
             len(key_bytes),
             key_bytes[:1].hex(),
             len(salt_str),
             len(raw_data),
+            has_key_parameters,
+            has_salt_parameters,
         )
         decrypted = _orig_decrypt_raw_data(
             credentials, crypto_key_str, salt_str, raw_data

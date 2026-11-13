@@ -157,6 +157,57 @@ def test_message_failure_does_not_prevent_next_message(coordinator_module):
     assert handler.call_count == 2
 
 
+@pytest.mark.parametrize(
+    ("key_suffix", "salt_suffix"),
+    [
+        (";p256ecdsa={public_key}", ""),
+        ("", ";rs=4096"),
+        (";p256ecdsa={public_key}", ";rs=4096"),
+    ],
+)
+@pytest.mark.parametrize("quoted", [False, True])
+def test_fcm_message_with_header_parameters_is_delivered(
+    coordinator_module, encrypted_message, key_suffix, salt_suffix, quoted, caplog
+):
+    from firebase_messaging.fcmpushclient import FcmPushClient
+    from firebase_messaging.proto.mcs_pb2 import DataMessageStanza
+
+    credentials, public, salt, ciphertext, _ = encrypted_message
+    credentials["gcm"] = {"app_id": "test-app"}
+    client = FcmPushClient.__new__(FcmPushClient)
+    client.credentials = credentials
+    client.callback = Mock()
+    client.callback_context = None
+    client._log_verbose = Mock()
+    client._reset_error_count = Mock()
+    encoded_key = encode(public)
+    if quoted:
+        encoded_key = f'"{encoded_key}"'
+        salt = f'"{salt}"'
+    key_value = encoded_key + key_suffix.format(public_key=encode(public))
+    message = DataMessageStanza(
+        raw_data=ciphertext,
+        persistent_id="test-message",
+        app_data=[
+            {"key": "crypto-key", "value": "dh=" + key_value},
+            {"key": "encryption", "value": "salt=" + salt + salt_suffix},
+            {"key": "subtype", "value": "test-app"},
+        ],
+    )
+    with caplog.at_level(logging.DEBUG, logger="ring_diagnostics_test"):
+        client._handle_data_message(message)
+    client.callback.assert_called_once_with(
+        {"test": "private-payload"}, "test-message", None
+    )
+    assert "normalized_key_bytes=65" in caplog.text
+    assert "FCM payload decrypted successfully" in caplog.text
+    assert "FCM message skipped" not in caplog.text
+    assert f"crypto_key_parameters={bool(key_suffix)}" in caplog.text
+    assert f"encryption_parameters={bool(salt_suffix)}" in caplog.text
+    for value in (*credentials["keys"].values(), encode(public), "private-payload"):
+        assert value not in caplog.text
+
+
 def test_health_check_reports_delivered_events(coordinator_module, caplog):
     coordinator = coordinator_module.RingListenCoordinator.__new__(
         coordinator_module.RingListenCoordinator

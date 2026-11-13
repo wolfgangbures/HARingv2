@@ -44,6 +44,11 @@ Device polling and push delivery are separate. A health check with `started=True
 does not prove that incoming push messages can be decrypted. Repeated
 `FCM message skipped` warnings mean messages are arriving but failing processing;
 `Invalid EC key` points to EC key validation, not a polling or DNS failure.
+One reproduced cause is a `crypto-key` header containing both `dh` and
+`p256ecdsa`: the upstream parser decodes both values together, producing a
+137-byte value instead of a 65-byte P-256 point. This integration isolates the
+key and salt values from trailing semicolon-separated parameters before decoding,
+while retaining the existing missing-padding and raw 64-byte point fixes.
 
 Enable integration debug logging from **Settings → Devices & Services → Ring →
 Enable debug logging**, reproduce a doorbell/unlock event, then disable logging
@@ -60,7 +65,8 @@ Look for `Applied firebase_messaging compatibility patches`, `FCM decrypt`,
 `FCM payload decrypted successfully`, `Ring event received`, and the traceback
 after `FCM message processing failure`. The decryption metadata records public-key
 length/point prefix and salt/payload lengths, not key values, credentials, or
-payload contents. The traceback distinguishes local private-key loading from
+payload contents. It also indicates whether trailing header parameters were
+removed. The traceback distinguishes local private-key loading from
 remote public-key validation and later decryption failures. Listener health logs
 also show subscription state, event count, and seconds since the last event
 (`None` means no event has reached this coordinator since setup).
