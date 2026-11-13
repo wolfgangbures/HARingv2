@@ -9,6 +9,7 @@ from base64 import urlsafe_b64encode as _urlsafe_b64encode
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 import logging
+from time import monotonic
 from typing import Any
 
 from ring_doorbell import (
@@ -64,14 +65,25 @@ try:
         salt_str: str,
         raw_data: bytes,
     ) -> bytes:
-        padding = -len(crypto_key_str) % 4
-        key_bytes = _orig_urlsafe_b64decode(
-            (crypto_key_str + "=" * padding).encode("ascii")
-        )
+        key_bytes = _padded_urlsafe_b64decode(crypto_key_str)
+        original_key_length = len(key_bytes)
         if len(key_bytes) == 64:
             key_bytes = b"\x04" + key_bytes
             crypto_key_str = _urlsafe_b64encode(key_bytes).decode("ascii").rstrip("=")
-        return _orig_decrypt_raw_data(credentials, crypto_key_str, salt_str, raw_data)
+        _LOGGER.debug(
+            "FCM decrypt: public_key_bytes=%s normalized_key_bytes=%s "
+            "point_prefix=%s salt_chars=%s payload_bytes=%s",
+            original_key_length,
+            len(key_bytes),
+            key_bytes[:1].hex(),
+            len(salt_str),
+            len(raw_data),
+        )
+        decrypted = _orig_decrypt_raw_data(
+            credentials, crypto_key_str, salt_str, raw_data
+        )
+        _LOGGER.debug("FCM payload decrypted successfully")
+        return decrypted
 
     _fcm_mod.FcmPushClient._decrypt_raw_data = _patched_decrypt_raw_data
 
@@ -83,16 +95,21 @@ try:
             _orig_handle_data_message(self, msg)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning(
-                "FCM message skipped due to decryption error (listener stays alive): %s: %s",
+                "FCM message skipped during processing (listener stays alive): %s: %s. "
+                "Enable custom_components.ring debug logging for the traceback",
                 type(err).__name__,
                 err,
             )
+            _LOGGER.debug("FCM message processing failure", exc_info=True)
 
     _fcm_mod.FcmPushClient._handle_data_message = _resilient_handle_data_message
 
     _LOGGER.debug("Applied firebase_messaging compatibility patches")
 except Exception:  # noqa: BLE001
-    pass
+    _LOGGER.exception(
+        "Failed to apply firebase_messaging compatibility patches; "
+        "Ring push events may not work"
+    )
 
 
 @dataclass
@@ -227,6 +244,8 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         self._listen_callback_id: int | None = None
         self._health_check_unsub: CALLBACK_TYPE | None = None
         self._restart_check_unsub: CALLBACK_TYPE | None = None
+        self._events_received = 0
+        self._last_event_received: float | None = None
 
         self.config_entry = config_entry
         self.start_timeout = 10
@@ -303,9 +322,18 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         if not self._listeners:
             return
         self.logger.debug(
-            "Ring listener health check: started=%s listeners=%s",
+            "Ring listener health check: started=%s subscribed=%s listeners=%s "
+            "events_received=%s last_event_age_seconds=%s "
+            "(started does not confirm successful push decryption)",
             self.event_listener.started,
+            self.event_listener.subscribed,
             len(self._listeners),
+            self._events_received,
+            (
+                round(monotonic() - self._last_event_received, 1)
+                if self._last_event_received is not None
+                else None
+            ),
         )
         if not self.event_listener.started:
             self.logger.warning(
@@ -361,7 +389,15 @@ class RingListenCoordinator(BaseDataUpdateCoordinatorProtocol):
         )
 
     def _on_event(self, event: RingEvent) -> None:
-        self.logger.debug("Ring event received: %s", event)
+        self._events_received += 1
+        self._last_event_received = monotonic()
+        self.logger.debug(
+            "Ring event received: device_api_id=%s kind=%s is_update=%s total=%s",
+            event.doorbot_id,
+            event.kind,
+            event.is_update,
+            self._events_received,
+        )
         self.index_alerts()
         self._async_update_listeners(event.doorbot_id)
 
